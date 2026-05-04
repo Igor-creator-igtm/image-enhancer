@@ -1,4 +1,6 @@
 import OpenAI from "openai";
+import formidable from "formidable";
+import fs from "fs";
 
 export const config = {
   api: {
@@ -10,17 +12,34 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+function parseForm(req) {
+  const form = formidable({ multiples: false });
+  return new Promise((resolve, reject) => {
+    form.parse(req, (err, fields, files) => {
+      if (err) reject(err);
+      else resolve({ fields, files });
+    });
+  });
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");
   }
 
   try {
-    // uzmi fajl iz requesta kao blob
-    const arrayBuffer = await new Response(req).arrayBuffer();
+    const { files } = await parseForm(req);
 
-    const result = await client.images.generate({
+    const file = files.image;
+    if (!file) {
+      return res.status(400).send("No image uploaded");
+    }
+
+    const stream = fs.createReadStream(file.filepath);
+
+    const result = await client.images.edits({
       model: "gpt-image-1",
+      image: stream,
       prompt: `
 Enhance this photo into a natural, high-end professional DSLR image.
 
@@ -36,9 +55,6 @@ Make only subtle, realistic improvements without altering composition.
 Avoid overprocessing, HDR, oversharpening, artificial effects or distortion.
 Make improvements clearly visible but still realistic.
       `,
-      size: "1024x1024",
-      // OVDE prosleđujemo sliku
-      image: arrayBuffer,
     });
 
     const image_base64 = result.data[0].b64_json;
@@ -48,7 +64,7 @@ Make improvements clearly visible but still realistic.
     res.send(image_bytes);
 
   } catch (err) {
-    console.error("ERROR:", err);
+    console.error("RUNTIME ERROR:", err);
     res.status(500).send("Server error");
   }
 }
